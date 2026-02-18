@@ -1,27 +1,6 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
-let _supabase: SupabaseClient | null = null;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-export function getSupabase(): SupabaseClient {
-  if (_supabase) return _supabase;
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) {
-    throw new Error(
-      "Supabase 환경변수가 설정되지 않았습니다. .env.local 파일을 확인하세요."
-    );
-  }
-
-  _supabase = createClient(url, key);
-  return _supabase;
-}
-
-// 클라이언트 컴포넌트용 (런타임에서만 호출됨)
-export const supabase = typeof window !== "undefined"
-  ? createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder"
-    )
-  : (null as unknown as SupabaseClient);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
