@@ -1,0 +1,120 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+function getSupabaseServer() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+}
+
+export async function POST(request: NextRequest) {
+  const { question } = await request.json();
+
+  if (!question) {
+    return NextResponse.json({ error: "질문을 입력해주세요." }, { status: 400 });
+  }
+
+  const apiKey = process.env.CLAUDE_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "Claude API 키가 설정되지 않았습니다." },
+      { status: 500 }
+    );
+  }
+
+  // RAG: 관련 사례 검색
+  let contextText = "";
+  try {
+    const keywords = question
+      .replace(/[^가-힣a-zA-Z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w: string) => w.length >= 2)
+      .slice(0, 5);
+
+    if (keywords.length > 0) {
+      const supabase = getSupabaseServer();
+      const { data: cases } = await supabase
+        .from("clinical_cases")
+        .select("*")
+        .or(
+          keywords
+            .map(
+              (kw: string) =>
+                `chief_complaint.ilike.%${kw}%,prescription.ilike.%${kw}%,pattern_identification.ilike.%${kw}%`
+            )
+            .join(",")
+        )
+        .limit(10);
+
+      if (cases && cases.length > 0) {
+        contextText = cases
+          .map(
+            (c) => `[${c.case_number || "사례"}]
+- 연령/성별: ${c.age_group} ${c.gender}
+- 주소증: ${c.chief_complaint}
+- 설진: ${c.tongue_diagnosis || "-"}
+- 맥진: ${c.pulse_diagnosis || "-"}
+- 변증: ${c.pattern_identification || "-"}
+- 처방: ${c.prescription}
+- 결과: ${c.outcome || "-"}
+- 배운점: ${c.learning_points || "-"}`
+          )
+          .join("\n---\n");
+      }
+    }
+  } catch {
+    // 검색 실패해도 AI 답변은 진행
+  }
+
+  const systemPrompt = `당신은 한의학 임상 연구를 돕는 AI 조언자입니다.
+사용자는 한의사로, 자신의 임상 사례를 익명화하여 연구 목적으로 기록하고 있습니다.
+
+귀하의 역할:
+1. 과거 임상 사례를 분석하여 패턴 발견
+2. 처방의 적합성 검토
+3. 유사 사례 기반 조언
+4. 임상적 통찰 제공
+
+학술적, 객관적으로 답변해주세요. 한자(漢字)를 적절히 활용하세요.
+${
+  contextText
+    ? `\n=== 참고할 과거 임상 사례 ===\n${contextText}`
+    : "\n(아직 등록된 과거 사례가 없습니다.)"
+}`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: question }],
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      return NextResponse.json(
+        { error: data.error.message },
+        { status: response.status }
+      );
+    }
+
+    return NextResponse.json({
+      answer: data.content[0].text,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Claude API 호출에 실패했습니다." },
+      { status: 500 }
+    );
+  }
+}
