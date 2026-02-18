@@ -12,7 +12,10 @@ export default function NewCasePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiAdvice, setAiAdvice] = useState("");
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [chatHistory, setChatHistory] = useState<
+    { role: "user" | "ai"; content: string }[]
+  >([]);
 
   const [form, setForm] = useState({
     age_group: "30대",
@@ -105,43 +108,46 @@ export default function NewCasePage() {
     setLoading(false);
   };
 
-  const handleAIAdvice = async () => {
-    if (!form.chief_complaint) {
-      alert("주소증을 먼저 입력해주세요.");
-      return;
-    }
+  const handleAsk = async (customQuestion?: string) => {
+    const question = customQuestion || aiQuestion.trim();
+    if (!question) return;
 
+    if (!customQuestion) setAiQuestion("");
+    setChatHistory((prev) => [...prev, { role: "user", content: question }]);
     setAiLoading(true);
-    setAiAdvice("");
+
+    const context = `현재 입력 중인 사례:
+- 연령/성별: ${form.age_group} ${form.gender}
+- 주소증: ${form.chief_complaint || "미입력"}
+- 설진: ${form.tongue_diagnosis || "미입력"}
+- 맥진: ${form.pulse_diagnosis || "미입력"}
+- 변증: ${form.pattern_identification || "미입력"}
+- 처방: ${form.prescription || "미입력"}`;
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: `다음 임상 사례에 대해 분석하고 조언해주세요:
-- 연령/성별: ${form.age_group} ${form.gender}
-- 주소증: ${form.chief_complaint}
-- 설진: ${form.tongue_diagnosis || "미입력"}
-- 맥진: ${form.pulse_diagnosis || "미입력"}
-- 변증: ${form.pattern_identification || "미입력"}
-- 현재 처방: ${form.prescription || "미입력"}
-
-처방 적합성, 대체 처방 제안, 주의사항을 알려주세요.`,
+          question: `${context}\n\n질문: ${question}`,
         }),
       });
 
       const data = await res.json();
-      setAiAdvice(data.answer || data.error || "응답을 받지 못했습니다.");
+      const answer = data.answer || data.error || "응답을 받지 못했습니다.";
+      setChatHistory((prev) => [...prev, { role: "ai", content: answer }]);
     } catch {
-      setAiAdvice("AI 서버 연결에 실패했습니다.");
+      setChatHistory((prev) => [
+        ...prev,
+        { role: "ai", content: "AI 서버 연결에 실패했습니다." },
+      ]);
     }
 
     setAiLoading(false);
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
         <button
@@ -153,7 +159,9 @@ export default function NewCasePage() {
         <h1 className="text-xl font-bold">새 임상 사례</h1>
       </div>
 
-      <div className="space-y-6">
+      <div className="flex gap-6 items-start">
+      {/* Left: Form */}
+      <div className="flex-1 min-w-0 space-y-6">
         {/* 기본 정보 */}
         <section className="bg-white rounded-xl p-6 border border-gray-100">
           <h2 className="font-semibold mb-4">기본 정보</h2>
@@ -373,16 +381,6 @@ export default function NewCasePage() {
           </div>
         </section>
 
-        {/* AI 조언 */}
-        {aiAdvice && (
-          <section className="bg-blue-50 rounded-xl p-6 border border-blue-100">
-            <h2 className="font-semibold mb-3 text-blue-900">AI 분석 결과</h2>
-            <div className="text-sm text-blue-800 whitespace-pre-wrap">
-              {aiAdvice}
-            </div>
-          </section>
-        )}
-
         {/* Actions */}
         <div className="flex gap-3 pb-8">
           <button
@@ -392,14 +390,138 @@ export default function NewCasePage() {
           >
             {loading ? "저장 중..." : "저장"}
           </button>
-          <button
-            onClick={handleAIAdvice}
-            disabled={aiLoading}
-            className="flex-1 py-3 bg-white text-blue-600 border border-blue-200 rounded-lg font-medium hover:bg-blue-50 disabled:opacity-50 transition-colors"
-          >
-            {aiLoading ? "분석 중..." : "AI 조언 받기"}
-          </button>
         </div>
+      </div>
+
+      {/* Right: AI Chat (sticky, desktop) */}
+      <div className="w-96 shrink-0 sticky top-8 hidden lg:block">
+        <section className="bg-blue-50 rounded-xl border border-blue-100 flex flex-col" style={{ height: "calc(100vh - 8rem)" }}>
+          <div className="p-4 border-b border-blue-100">
+            <h2 className="text-sm font-semibold text-blue-900">AI 조언</h2>
+            <p className="text-xs text-blue-400 mt-0.5">입력 중인 사례를 기반으로 분석합니다</p>
+          </div>
+
+          {/* Chat messages */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {chatHistory.length === 0 && (
+              <div className="text-center mt-8 space-y-3">
+                <p className="text-sm text-blue-400">
+                  사례를 입력하면서 AI에게 물어보세요
+                </p>
+                <button
+                  onClick={() =>
+                    handleAsk("이 사례에 대해 처방 적합성, 대체 처방 제안, 주의사항을 알려주세요.")
+                  }
+                  disabled={aiLoading}
+                  className="px-3 py-1.5 text-xs bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                >
+                  전체 분석 요청
+                </button>
+              </div>
+            )}
+            {chatHistory.map((msg, i) => (
+              <div
+                key={i}
+                className={`text-sm ${
+                  msg.role === "user"
+                    ? "ml-8 bg-blue-600 text-white rounded-2xl rounded-br-md p-3"
+                    : "mr-4 bg-white text-blue-900 rounded-2xl rounded-bl-md p-4 border border-blue-100 whitespace-pre-wrap"
+                }`}
+              >
+                {msg.content}
+              </div>
+            ))}
+            {aiLoading && (
+              <div className="mr-4 bg-white text-blue-400 rounded-2xl rounded-bl-md p-4 border border-blue-100 text-sm">
+                분석 중...
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="p-3 border-t border-blue-100">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={aiQuestion}
+                onChange={(e) => setAiQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !aiLoading && handleAsk()}
+                className="flex-1 px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                placeholder="질문 입력..."
+              />
+              <button
+                onClick={() => handleAsk()}
+                disabled={aiLoading}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                전송
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+      </div>
+
+      {/* Mobile: AI Chat at bottom */}
+      <div className="lg:hidden mt-6 px-0">
+        <section className="bg-blue-50 rounded-xl p-5 border border-blue-100">
+          <h2 className="text-sm font-semibold text-blue-900 mb-1">AI 조언</h2>
+          <p className="text-xs text-blue-400 mb-3">입력 중인 사례를 기반으로 분석합니다</p>
+
+          {chatHistory.length === 0 && (
+            <div className="text-center mb-3">
+              <button
+                onClick={() =>
+                  handleAsk("이 사례에 대해 처방 적합성, 대체 처방 제안, 주의사항을 알려주세요.")
+                }
+                disabled={aiLoading}
+                className="px-3 py-1.5 text-xs bg-white text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors"
+              >
+                전체 분석 요청
+              </button>
+            </div>
+          )}
+
+          {chatHistory.length > 0 && (
+            <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
+              {chatHistory.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`text-sm ${
+                    msg.role === "user"
+                      ? "ml-8 bg-blue-600 text-white rounded-2xl rounded-br-md p-3"
+                      : "mr-4 bg-white text-blue-900 rounded-2xl rounded-bl-md p-4 border border-blue-100 whitespace-pre-wrap"
+                  }`}
+                >
+                  {msg.content}
+                </div>
+              ))}
+              {aiLoading && (
+                <div className="mr-4 bg-white text-blue-400 rounded-2xl rounded-bl-md p-4 border border-blue-100 text-sm">
+                  분석 중...
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={aiQuestion}
+              onChange={(e) => setAiQuestion(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !aiLoading && handleAsk()}
+              className="flex-1 px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              placeholder="질문 입력..."
+            />
+            <button
+              onClick={() => handleAsk()}
+              disabled={aiLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              전송
+            </button>
+          </div>
+        </section>
       </div>
     </div>
   );
