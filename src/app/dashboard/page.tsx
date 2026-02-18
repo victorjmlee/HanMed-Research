@@ -66,6 +66,18 @@ export default function DashboardPage() {
             + 새 사례
           </button>
           <button
+            onClick={() => router.push("/stats")}
+            className="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm border border-gray-200 rounded-lg"
+          >
+            통계
+          </button>
+          <button
+            onClick={() => router.push("/guide")}
+            className="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm border border-gray-200 rounded-lg"
+          >
+            가이드
+          </button>
+          <button
             onClick={handleLogout}
             className="px-4 py-2 text-gray-500 hover:text-gray-700 text-sm"
           >

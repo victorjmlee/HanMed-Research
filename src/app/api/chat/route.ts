@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import OpenAI from "openai";
 
 function getSupabaseServer() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+}
+
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 }
 
 export async function POST(request: NextRequest) {
@@ -23,34 +28,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // RAG: 관련 사례 검색
+  // RAG: 벡터 검색으로 유사 사례 검색
   let contextText = "";
   try {
-    const keywords = question
-      .replace(/[^가-힣a-zA-Z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((w: string) => w.length >= 2)
-      .slice(0, 5);
+    const supabase = getSupabaseServer();
 
-    if (keywords.length > 0) {
-      const supabase = getSupabaseServer();
-      const { data: cases } = await supabase
-        .from("clinical_cases")
-        .select("*")
-        .or(
-          keywords
-            .map(
-              (kw: string) =>
-                `chief_complaint.ilike.%${kw}%,prescription.ilike.%${kw}%,pattern_identification.ilike.%${kw}%`
-            )
-            .join(",")
-        )
-        .limit(10);
+    if (process.env.OPENAI_API_KEY) {
+      // 질문을 임베딩으로 변환
+      const embeddingRes = await getOpenAI().embeddings.create({
+        model: "text-embedding-3-small",
+        input: question,
+      });
+
+      const queryEmbedding = embeddingRes.data[0].embedding;
+
+      // match_cases RPC로 유사 사례 검색
+      const { data: cases } = await supabase.rpc("match_cases", {
+        query_embedding: JSON.stringify(queryEmbedding),
+        match_threshold: 0.3,
+        match_count: 10,
+      });
 
       if (cases && cases.length > 0) {
         contextText = cases
           .map(
-            (c) => `[${c.case_number || "사례"}]
+            (c: Record<string, string | number | null>) =>
+              `[${c.case_number || "사례"}] (유사도: ${typeof c.similarity === "number" ? (c.similarity as number).toFixed(2) : c.similarity})
 - 연령/성별: ${c.age_group} ${c.gender}
 - 주소증: ${c.chief_complaint}
 - 설진: ${c.tongue_diagnosis || "-"}
@@ -64,7 +67,7 @@ export async function POST(request: NextRequest) {
       }
     }
   } catch {
-    // 검색 실패해도 AI 답변은 진행
+    // 벡터 검색 실패해도 AI 답변은 진행
   }
 
   const systemPrompt = `당신은 한의학 임상 연구를 돕는 AI 조언자입니다.
@@ -92,7 +95,7 @@ ${
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-20250514",
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: "user", content: question }],

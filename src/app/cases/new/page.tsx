@@ -71,7 +71,7 @@ export default function NewCasePage() {
 
     const herbDetails = herbs.filter((h) => h.name.trim());
 
-    const { error } = await supabase.from("clinical_cases").insert({
+    const { data, error } = await supabase.from("clinical_cases").insert({
       doctor_id: user.id,
       age_group: form.age_group,
       gender: form.gender,
@@ -87,11 +87,19 @@ export default function NewCasePage() {
       clinical_notes: form.clinical_notes || null,
       learning_points: form.learning_points || null,
       tags: tags.length > 0 ? tags : null,
-    });
+    }).select("id").single();
 
     if (error) {
       alert("저장 실패: " + error.message);
     } else {
+      // 비동기 임베딩 생성 (실패해도 케이스 저장은 유지)
+      if (data?.id) {
+        fetch("/api/embed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ case_id: data.id }),
+        }).catch(() => {});
+      }
       router.push("/dashboard");
     }
     setLoading(false);

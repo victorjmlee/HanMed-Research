@@ -173,3 +173,57 @@ CREATE INDEX idx_cases_tags ON clinical_cases USING GIN(tags);
 CREATE INDEX idx_cases_symptoms ON clinical_cases USING GIN(symptoms);
 CREATE INDEX idx_ai_conv_doctor ON ai_conversations(doctor_id);
 CREATE INDEX idx_ai_conv_case ON ai_conversations(case_id);
+
+-- =============================================
+-- pgvector: 벡터 검색 (의미적 유사도)
+-- =============================================
+
+-- pgvector 확장 활성화
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 임베딩 컬럼 추가
+ALTER TABLE clinical_cases ADD COLUMN embedding vector(1536);
+
+-- 유사도 검색 함수
+CREATE OR REPLACE FUNCTION match_cases(
+  query_embedding vector(1536),
+  match_threshold float DEFAULT 0.3,
+  match_count int DEFAULT 10
+)
+RETURNS TABLE (
+  id uuid,
+  case_number text,
+  age_group text,
+  gender text,
+  chief_complaint text,
+  tongue_diagnosis text,
+  pulse_diagnosis text,
+  pattern_identification text,
+  prescription text,
+  herb_details jsonb,
+  outcome text,
+  outcome_notes text,
+  clinical_notes text,
+  learning_points text,
+  similarity float
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    c.id, c.case_number, c.age_group, c.gender,
+    c.chief_complaint, c.tongue_diagnosis, c.pulse_diagnosis,
+    c.pattern_identification, c.prescription, c.herb_details,
+    c.outcome, c.outcome_notes, c.clinical_notes, c.learning_points,
+    1 - (c.embedding <=> query_embedding) AS similarity
+  FROM clinical_cases c
+  WHERE c.embedding IS NOT NULL
+    AND 1 - (c.embedding <=> query_embedding) > match_threshold
+  ORDER BY c.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+
+-- HNSW 인덱스 (코사인 유사도)
+CREATE INDEX idx_cases_embedding ON clinical_cases
+  USING hnsw (embedding vector_cosine_ops);

@@ -125,6 +125,12 @@ export default function EditCasePage() {
     if (error) {
       alert("수정 실패: " + error.message);
     } else {
+      // 비동기 임베딩 재생성 (실패해도 수정은 유지)
+      fetch("/api/embed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ case_id: id }),
+      }).catch(() => {});
       router.push(`/cases/${id}`);
     }
     setLoading(false);
